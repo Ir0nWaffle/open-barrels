@@ -6,6 +6,7 @@
  * room pushes them to every viewer over a WebSocket.
  *
  *   POST   /api/events          { organizerCode }  -> { id, adminKey }
+ *   POST   /api/events          { demo: true }     -> { id, adminKey, demo, expiresAt }
  *   GET    /api/events/:id                         -> latest public results
  *   GET    /api/events/:id/ws                      -> live updates (WebSocket)
  *   PUT    /api/events/:id      (Bearer adminKey)  -> publish new results
@@ -14,11 +15,17 @@
  * ORGANIZER_CODES (a secret) is a comma-separated list of codes allowed to
  * create live links. Give each approved organizer their own code so one can
  * be removed without affecting the others.
+ *
+ * Demo links need no code so anyone can try the feature, but they end after
+ * 24 hours and only DEMO_PER_DAY (default 50) can be made per day in total,
+ * so demos can never use up the free allowance that real events rely on.
  */
 import { DurableObject } from 'cloudflare:workers';
 
 const MAX_BYTES = 256 * 1024;
 const EXPIRE_MS = 60 * 24 * 60 * 60 * 1000; // forget an event 60 days after its last update
+const DEMO_MS = 24 * 60 * 60 * 1000; // demo links end 24 hours after they start
+const DEMO_MAX_BYTES = 64 * 1024;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -66,6 +73,18 @@ export default {
     if (parts.length === 2) {
       if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
       const body = await request.json().catch(() => null);
+      if (body && body.demo === true) {
+        const limit = Math.max(0, parseInt(env.DEMO_PER_DAY || '50', 10) || 0);
+        const counter = env.DEMO_COUNTER.get(env.DEMO_COUNTER.idFromName('global'));
+        if (!(await counter.take(limit))) {
+          return json({ error: 'All of today’s demo links are used up. Try again tomorrow, or ask for an organizer code.' }, 429);
+        }
+        const id = randomId(10);
+        const adminKey = randomHex(24);
+        const expiresAt = Date.now() + DEMO_MS;
+        await env.LIVE.get(env.LIVE.idFromName(id)).init(await sha256(adminKey), expiresAt);
+        return json({ id, adminKey, demo: true, expiresAt }, 201);
+      }
       const codes = String(env.ORGANIZER_CODES || '')
         .split(',')
         .map((s) => s.trim())
@@ -95,10 +114,13 @@ export class LiveEvent extends DurableObject {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
 
-  async init(adminHash) {
+  /** demoExpiresAt is set for demo links, which end at that time no matter what. */
+  async init(adminHash, demoExpiresAt) {
     if (await this.ctx.storage.get('adminHash')) throw new Error('already exists');
-    await this.ctx.storage.put({ adminHash, created: Date.now() });
-    await this.ctx.storage.setAlarm(Date.now() + EXPIRE_MS);
+    const rec = { adminHash, created: Date.now() };
+    if (demoExpiresAt) rec.demoExpiresAt = demoExpiresAt;
+    await this.ctx.storage.put(rec);
+    await this.ctx.storage.setAlarm(demoExpiresAt || Date.now() + EXPIRE_MS);
   }
 
   broadcast(text) {
@@ -136,8 +158,9 @@ export class LiveEvent extends DurableObject {
     if (!key || (await sha256(key)) !== adminHash) return json({ error: 'Not allowed' }, 403);
 
     if (request.method === 'PUT') {
+      const demoExpiresAt = await this.ctx.storage.get('demoExpiresAt');
       const text = await request.text();
-      if (text.length > MAX_BYTES) return json({ error: 'Too large' }, 413);
+      if (text.length > (demoExpiresAt ? DEMO_MAX_BYTES : MAX_BYTES)) return json({ error: 'Too large' }, 413);
       let data;
       try {
         data = JSON.parse(text);
@@ -146,9 +169,16 @@ export class LiveEvent extends DurableObject {
       }
       if (!data || typeof data !== 'object' || Array.isArray(data)) return json({ error: 'Bad data' }, 400);
       data.updatedAt = Date.now();
+      delete data.demo;
+      delete data.expiresAt;
+      if (demoExpiresAt) {
+        // Set here, not by the app, so a demo can't pretend to be a real event.
+        data.demo = true;
+        data.expiresAt = demoExpiresAt;
+      }
       const out = JSON.stringify({ type: 'snapshot', data });
       await this.ctx.storage.put('snapshot', out);
-      await this.ctx.storage.setAlarm(Date.now() + EXPIRE_MS);
+      if (!demoExpiresAt) await this.ctx.storage.setAlarm(Date.now() + EXPIRE_MS);
       this.broadcast(out);
       return json({ ok: true, viewers: this.ctx.getWebSockets().length });
     }
@@ -188,5 +218,17 @@ export class LiveEvent extends DurableObject {
     } catch (e) {
       /* ignore */
     }
+  }
+}
+
+/** Counts demo links made today (UTC) across everyone. */
+export class DemoCounter extends DurableObject {
+  async take(limit) {
+    const day = new Date().toISOString().slice(0, 10);
+    const rec = (await this.ctx.storage.get('count')) || {};
+    const used = rec.day === day ? rec.used : 0;
+    if (used >= limit) return false;
+    await this.ctx.storage.put('count', { day, used: used + 1 });
+    return true;
   }
 }

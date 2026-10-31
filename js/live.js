@@ -153,9 +153,16 @@
 
     $('#main').innerHTML = `
       <div class="viewer-head">
-        <h1>${esc(d.name)}</h1>
+        <h1>${esc(d.name)}${d.demo ? ' <span class="pill warn">Demo</span>' : ''}</h1>
         <div class="muted small">${esc([d.date, d.location].filter(Boolean).join(' · '))}${updated ? ` · updated ${esc(updated)}` : ''}</div>
       </div>
+      ${
+        d.demo
+          ? `<div class="notice warn">This is a demo of Open Barrels live results. It ends ${esc(
+              new Date(d.expiresAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+            )}.</div>`
+          : ''
+      }
       ${up.length ? `<div class="upnext">${upBox('Now up', up[0], 'now')}${upBox('On deck', up[1], '')}${upBox('In the hole', up[2], '')}</div>` : ''}
       <div class="class-tabs">${classes
         .map(

@@ -4,6 +4,7 @@ A tiny Cloudflare Worker that relays live results from the organizer's device to
 
 - The organizer's app sends only names, horses, times and places. Money never leaves their device.
 - Each event is one Durable Object ("room") that pushes updates to viewers over a WebSocket. Pushing to viewers is free; only connections and organizer updates count toward the 100,000 requests/day free allowance.
+- **Demo links** need no code so anyone can try it. They end after 24 hours, hold at most 64 KB, show a "Demo" label the app can't remove, and only `DEMO_PER_DAY` (default 50, in `wrangler.jsonc`) can be made per day in total — so demos can't use up the allowance real events need.
 - Events are deleted automatically 60 days after their last update, or right away when the organizer taps **Stop live link**.
 
 ## Run your own copy
@@ -24,7 +25,8 @@ A tiny Cloudflare Worker that relays live results from the organizer's device to
 ## Local testing
 
 ```
-echo 'ORGANIZER_CODES=test-code' > .dev.vars
+printf 'ORGANIZER_CODES=test-code\nDEMO_PER_DAY=3\n' > .dev.vars
 npx wrangler dev
 python3 ../tests/test_live.py
+python3 ../tests/test_demo.py      # run with a fresh local server (rm -rf .wrangler/state)
 ```

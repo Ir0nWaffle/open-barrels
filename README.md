@@ -16,7 +16,7 @@ It runs in any web browser on a phone, tablet or laptop, keeps working with no s
 - **Payout by rider** total, for writing checks.
 - **Print** the draw sheet or results, **download CSV**, and **back up / move** an event to another device as a file.
 - **New event with these classes** copies last week's setup without the riders.
-- **Live results link** (optional). Share a link or QR code so families can follow the draw, who's up next, and standings on their phones, with no app or account. The organizer chooses whether to show times, and whether placings appear live or only when a class finishes. Entry fees, the pot and payouts are never sent. Needs an organizer code from whoever runs the live server (see [`worker/`](worker/README.md)).
+- **Live results link** (optional). Share a link or QR code so families can follow the draw, who's up next, and standings on their phones, with no app or account. The organizer chooses whether to show times, and whether placings appear live or only when a class finishes. Entry fees, the pot and payouts are never sent. Real events need an organizer code from whoever runs the live server (see [`worker/`](worker/README.md)); anyone can press **Try a demo link** for a free 24-hour demo.
 
 ## Using it
 

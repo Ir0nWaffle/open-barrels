@@ -922,7 +922,9 @@
         if (entry.status === 'nt') entry.timeMs = null;
         break;
       case 'live-start':
-        return startLive();
+        return startLive(false);
+      case 'live-demo':
+        return startLive(true);
       case 'live-stop':
         return stopLive();
       case 'live-copy':
@@ -1140,6 +1142,7 @@
 
   function liveStatusText(e) {
     const st = liveState[e.id] || {};
+    if (e.live && e.live.demo && e.live.expiresAt && Date.now() > e.live.expiresAt) return 'This demo link has ended. Stop it to start another.';
     if (st.error) return st.error;
     if (st.sending) return 'Sending…';
     if (st.at) {
@@ -1244,32 +1247,36 @@
   }
   window.addEventListener('online', () => queueLivePush(0));
 
-  async function startLive() {
+  async function startLive(demo) {
     const e = ev();
-    const code = (S.organizerCode || ($('#live-code') && $('#live-code').value) || '').trim();
-    if (!code) return toast('Enter your organizer code first');
-    S.organizerCode = code;
+    const code = (($('#live-code') && $('#live-code').value) || S.organizerCode || '').trim();
+    if (!demo && !code) return toast('Enter your organizer code, or try a demo link');
+    if (!demo) S.organizerCode = code;
     const server = liveServer();
-    const btn = $('[data-action=live-start]');
-    if (btn) btn.disabled = true;
+    const btns = $$('[data-action=live-start], [data-action=live-demo]');
+    btns.forEach((b) => (b.disabled = true));
     try {
       const res = await fetch(server + '/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ organizerCode: code }),
+        body: JSON.stringify(demo ? { demo: true } : { organizerCode: code }),
       });
       const r = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(r.error || 'The live server said no (' + res.status + ')');
       e.live = { id: r.id, adminKey: r.adminKey, server, started: Date.now() };
+      if (r.demo) {
+        e.live.demo = true;
+        e.live.expiresAt = r.expiresAt;
+      }
       e.liveShow = Object.assign(defaultLiveShow(), e.liveShow);
       delete liveState[e.id];
       save();
       render();
       queueLivePush(0);
-      toast('Live link is ready — share it!');
+      toast(demo ? 'Demo link is ready — it ends in 24 hours' : 'Live link is ready — share it!');
     } catch (err) {
       toast(err.message && !/fetch/i.test(err.message) ? err.message : 'Could not reach the live server. Check your signal.');
-      if (btn) btn.disabled = false;
+      btns.forEach((b) => (b.disabled = false));
     }
   }
 
@@ -1341,7 +1348,11 @@
         <div class="grid" style="margin-top:12px">
           <label class="field">Organizer code<input id="live-code" value="${esc(S.organizerCode || '')}" autocomplete="off" placeholder="from the app's owner"></label>
         </div>
-        <div class="row-actions" style="margin-top:12px"><button class="primary" data-action="live-start">Start live link</button></div>
+        <div class="row-actions" style="margin-top:12px">
+          <button class="primary" data-action="live-start">Start live link</button>
+          <button data-action="live-demo">Try a demo link</button>
+        </div>
+        <p class="muted small">No code? A demo link works the same way but ends after 24 hours.</p>
         <details style="margin-top:12px"><summary class="small muted">Advanced: use your own live server</summary>
           <label class="field" style="margin-top:8px">Live server address<input id="live-server" value="${esc(S.liveServer || '')}" placeholder="${esc(DEFAULT_LIVE_SERVER)}" autocomplete="off"></label>
           <p class="muted small">Groups can run their own free copy of the live server. See the project README.</p>
@@ -1350,7 +1361,11 @@
     }
     const link = liveLink(e);
     return `<section class="card live-card">
-      <div class="card-head"><h2>Live results link</h2><span class="pill good"><span class="live-dot"></span> On</span></div>
+      <div class="card-head"><h2>Live results link</h2>${
+        e.live.demo
+          ? `<span class="pill warn">Demo · ends ${esc(new Date(e.live.expiresAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}</span>`
+          : '<span class="pill good"><span class="live-dot"></span> On</span>'
+      }</div>
       <div class="live-share">
         <div class="qr" aria-label="QR code for the live link">${qrSvg(link)}</div>
         <div class="live-share-main">

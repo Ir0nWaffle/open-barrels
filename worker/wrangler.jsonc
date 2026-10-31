@@ -4,8 +4,16 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
   "durable_objects": {
-    "bindings": [{ "name": "LIVE", "class_name": "LiveEvent" }]
+    "bindings": [
+      { "name": "LIVE", "class_name": "LiveEvent" },
+      { "name": "DEMO_COUNTER", "class_name": "DemoCounter" }
+    ]
   },
   // The free plan only allows SQLite-backed Durable Objects.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveEvent"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["LiveEvent"] },
+    { "tag": "v2", "new_sqlite_classes": ["DemoCounter"] }
+  ],
+  // How many demo links (no organizer code, 24 hours) can be made per day in total.
+  "vars": { "DEMO_PER_DAY": "50" }
 }
