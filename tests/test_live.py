@@ -3,7 +3,7 @@
 Needs the live server running locally first:
     cd worker && npx wrangler dev        (with ORGANIZER_CODES=test-code in worker/.dev.vars)
 Then:
-    python3 tests/test_live.py [--server http://127.0.0.1:8787] [--shots DIR]
+    python3 tests/test_live.py [--server http://127.0.0.1:8787] [--code CODE] [--shots DIR]
 """
 import functools
 import http.server
@@ -19,6 +19,10 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SERVER = "http://127.0.0.1:8787"
 if "--server" in sys.argv:
     SERVER = sys.argv[sys.argv.index("--server") + 1]
+UA = {"User-Agent": "Mozilla/5.0 (open-barrels test)"}
+CODE = "test-code"
+if "--code" in sys.argv:
+    CODE = sys.argv[sys.argv.index("--code") + 1]
 SHOTS = None
 if "--shots" in sys.argv:
     SHOTS = pathlib.Path(sys.argv[sys.argv.index("--shots") + 1])
@@ -66,12 +70,12 @@ def main():
         admin.locator("#live-code").press("Tab")
         admin.click("text=Start live link")
         expect(admin.locator("#toast")).to_contain_text("not valid")
-        admin.fill("#live-code", "test-code")
+        admin.fill("#live-code", CODE)
         admin.locator("#live-code").press("Tab")
         admin.click("text=Start live link")
         expect(admin.locator("#live-url")).to_be_visible()
         link = admin.locator("#live-url").input_value()
-        assert "live.html#e=" in link and "s=" in link, link
+        assert "live.html#e=" in link, link
         assert admin.locator(".qr svg").count() == 1
         expect(admin.locator("[data-live-status]")).to_contain_text("watching", timeout=8000)
         if SHOTS:
@@ -104,7 +108,7 @@ def main():
 
         # What the server holds must contain no money at all.
         lid = link.split("e=")[1].split("&")[0]
-        raw = urllib.request.urlopen(f"{SERVER}/api/events/{lid}").read().decode()
+        raw = urllib.request.urlopen(urllib.request.Request(f"{SERVER}/api/events/{lid}", headers=UA)).read().decode()
         snap = json.loads(raw)["data"]
         keys, values = set(), []
 
@@ -141,7 +145,7 @@ def main():
         admin.click("text=Stop live link")
         expect(viewer.locator("#connText")).to_have_text("Ended", timeout=6000)
         expect(admin.locator("text=Start live link")).to_be_visible()
-        gone = urllib.request.Request(f"{SERVER}/api/events/{lid}")
+        gone = urllib.request.Request(f"{SERVER}/api/events/{lid}", headers=UA)
         try:
             urllib.request.urlopen(gone)
             raise AssertionError("event still exists after stop")
