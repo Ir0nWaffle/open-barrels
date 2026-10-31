@@ -44,6 +44,7 @@
   function save() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, 150);
+    queueLivePush();
   }
   function saveNow() {
     clearTimeout(saveTimer);
@@ -254,6 +255,8 @@
     </section>
 
     ${e.classes.map((c, i) => renderClassCard(c, i, e.classes.length)).join('')}
+
+    ${renderLiveCard(e)}
 
     <section class="card">
       <div class="card-head"><h2>Events &amp; backup</h2></div>
@@ -517,6 +520,7 @@
       .join('');
 
     return `
+      ${e.live ? `<div class="live-strip"><span class="live-dot"></span> Live link on · <span data-live-status="${e.id}">${esc(liveStatusText(e))}</span></div>` : ''}
       <div class="class-tabs">${tabs}</div>
       ${
         nowId || classStarted(cls)
@@ -845,6 +849,7 @@
         const ne = newEvent(nm.trim() || undefined);
         ne.gap = e.gap;
         ne.spaceHorses = e.spaceHorses;
+        ne.liveShow = e.liveShow;
         ne.location = e.location;
         ne.classes = e.classes.map((c) => {
           const nc = newClass(c.name, c);
@@ -916,6 +921,17 @@
         entry.status = entry.status === 'nt' ? 'waiting' : 'nt';
         if (entry.status === 'nt') entry.timeMs = null;
         break;
+      case 'live-start':
+        return startLive();
+      case 'live-stop':
+        return stopLive();
+      case 'live-copy':
+        copyText(liveLink(e)).then((ok) => toast(ok ? 'Link copied' : 'Press and hold the link to copy it'));
+        return;
+      case 'live-share':
+        if (navigator.share) navigator.share({ title: e.name + ' — live results', url: liveLink(e) }).catch(() => {});
+        else copyText(liveLink(e)).then(() => toast('Link copied'));
+        return;
       case 'more':
         return openRowMenu(el, entry);
       default:
@@ -1105,6 +1121,253 @@
     raf = requestAnimationFrame(tick);
   }
 
+  // ------------------------------------------------------------ live results link
+
+  // Address of the live results server (see worker/). Organizers can point at
+  // their own server in Setup → Live results link → Advanced.
+  const DEFAULT_LIVE_SERVER = (window.OB_CONFIG && window.OB_CONFIG.liveServer) || '';
+  const liveServer = () => S.liveServer || DEFAULT_LIVE_SERVER;
+  const liveState = {}; // per event: { ok, at, viewers, error, sending, lastBody, retry }
+  const defaultLiveShow = () => ({ draw: true, times: true, results: 'live' });
+
+  function liveLink(e) {
+    if (!e.live) return '';
+    const base = location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '');
+    const q = new URLSearchParams({ e: e.live.id });
+    if (e.live.server !== DEFAULT_LIVE_SERVER) q.set('s', e.live.server);
+    return base + 'live.html#' + q.toString();
+  }
+
+  function liveStatusText(e) {
+    const st = liveState[e.id] || {};
+    if (st.error) return st.error;
+    if (st.sending) return 'Sending…';
+    if (st.at) {
+      const t = new Date(st.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+      const v = st.viewers || 0;
+      return `Updated ${t} · ${v} watching`;
+    }
+    return navigator.onLine === false ? 'No signal — will send when it comes back' : 'Waiting to send…';
+  }
+
+  function updateLiveStatus() {
+    for (const e of S.events) {
+      const txt = liveStatusText(e);
+      document.querySelectorAll(`[data-live-status="${e.id}"]`).forEach((el) => (el.textContent = txt));
+    }
+  }
+
+  /** What viewers see. Money (fees, pot, payouts) is never included. */
+  function buildLiveSnapshot(e) {
+    const show = Object.assign(defaultLiveShow(), e.liveShow);
+    const classes = e.classes.map((c) => {
+      const list = classEntries(c);
+      const res = BR.computeResults(c, list);
+      const done = list.length > 0 && list.every((x) => x.status !== 'waiting');
+      const started = list.some((x) => x.status !== 'waiting');
+      const out = { id: c.id, name: c.name, state: done ? 'done' : started ? 'running' : 'waiting', count: list.length };
+      if (show.draw) {
+        out.draw = list.map((x) => {
+          const d = { rider: x.rider, horse: x.horse, st: x.status };
+          if (x.late) d.late = 1;
+          if (show.times && x.status === 'ran') {
+            d.time = BR.formatTime(BR.finalMs(x, c));
+            if (x.barrels) d.bbl = x.barrels;
+          }
+          return d;
+        });
+      }
+      if (show.results === 'live' || (show.results === 'done' && done)) {
+        out.results = res.divisions.map((d) => {
+          const div = { name: d.name, places: d.places, rows: [] };
+          if (show.times && d.startMs != null) div.start = BR.formatTime(d.startMs);
+          div.rows = d.rows
+            .filter((r) => r.placed)
+            .map((r) => {
+              const row = { place: placeLabel(r), rider: r.entry.rider, horse: r.entry.horse };
+              if (show.times) row.time = BR.formatTime(r.ms);
+              return row;
+            });
+          return div;
+        });
+      } else if (show.results === 'done') out.resultsLater = true;
+      return out;
+    });
+    const upNext = [];
+    if (show.draw)
+      for (const c of e.classes)
+        for (const x of classEntries(c))
+          if (x.status === 'waiting' && upNext.length < 3) upNext.push({ rider: x.rider, horse: x.horse, cls: c.name });
+    return { v: 1, name: e.name, date: e.date, location: e.location, show, classes, upNext };
+  }
+
+  let liveTimer = null;
+  function queueLivePush(delay) {
+    if (!S.events.some((e) => e.live)) return;
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(pushLive, delay == null ? 1200 : delay);
+  }
+
+  async function pushLive() {
+    for (const e of S.events) {
+      if (!e.live) continue;
+      const st = (liveState[e.id] = liveState[e.id] || {});
+      const body = JSON.stringify(buildLiveSnapshot(e));
+      if (body === st.lastBody || st.sending) continue;
+      st.sending = true;
+      updateLiveStatus();
+      try {
+        const res = await fetch(`${e.live.server}/api/events/${e.live.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + e.live.adminKey },
+          body,
+        });
+        if (res.status === 403 || res.status === 404) {
+          st.error = 'This live link no longer works. Stop it and start a new one.';
+          st.lastBody = body;
+        } else if (!res.ok) throw new Error('server ' + res.status);
+        else {
+          const r = await res.json().catch(() => ({}));
+          Object.assign(st, { ok: true, at: Date.now(), viewers: r.viewers || 0, error: null, lastBody: body });
+        }
+      } catch (err) {
+        st.error = navigator.onLine === false ? 'No signal — will send when it comes back' : 'Could not reach the live server — retrying';
+        clearTimeout(st.retry);
+        st.retry = setTimeout(() => queueLivePush(0), 15000);
+      } finally {
+        st.sending = false;
+      }
+      // Something may have changed while sending.
+      if (body !== JSON.stringify(buildLiveSnapshot(e)) && !st.error) queueLivePush(300);
+      updateLiveStatus();
+    }
+  }
+  window.addEventListener('online', () => queueLivePush(0));
+
+  async function startLive() {
+    const e = ev();
+    const code = (S.organizerCode || ($('#live-code') && $('#live-code').value) || '').trim();
+    if (!code) return toast('Enter your organizer code first');
+    S.organizerCode = code;
+    const server = liveServer();
+    const btn = $('[data-action=live-start]');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch(server + '/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizerCode: code }),
+      });
+      const r = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(r.error || 'The live server said no (' + res.status + ')');
+      e.live = { id: r.id, adminKey: r.adminKey, server, started: Date.now() };
+      e.liveShow = Object.assign(defaultLiveShow(), e.liveShow);
+      delete liveState[e.id];
+      save();
+      render();
+      queueLivePush(0);
+      toast('Live link is ready — share it!');
+    } catch (err) {
+      toast(err.message && !/fetch/i.test(err.message) ? err.message : 'Could not reach the live server. Check your signal.');
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function stopLive() {
+    const e = ev();
+    if (!e.live) return;
+    if (!confirm('Stop the live link? Anyone watching will see that it has ended, and the link will stop working.')) return;
+    try {
+      await fetch(`${e.live.server}/api/events/${e.live.id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + e.live.adminKey } });
+    } catch (err) {
+      /* if offline the link simply expires later */
+    }
+    delete e.live;
+    delete liveState[e.id];
+    save();
+    render();
+    toast('Live link stopped');
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (err) {
+      const i = $('#live-url');
+      if (i) {
+        i.select();
+        try {
+          return document.execCommand('copy');
+        } catch (e2) {
+          return false;
+        }
+      }
+      return false;
+    }
+  }
+
+  function qrSvg(text) {
+    if (typeof qrcode !== 'function') return '';
+    try {
+      const q = qrcode(0, 'M');
+      q.addData(text);
+      q.make();
+      return q.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function renderLiveCard(e) {
+    const show = Object.assign(defaultLiveShow(), e.liveShow);
+    const options = `
+      <div class="live-options">
+        <label class="check"><input type="checkbox" data-live-show="draw" ${show.draw ? 'checked' : ''}> Show the draw and who's up next</label>
+        <label class="check"><input type="checkbox" data-live-show="times" ${show.times ? 'checked' : ''}> Show times</label>
+        <label class="field">Placings
+          <select data-live-show="results" id="live-results">
+            <option value="live" ${show.results === 'live' ? 'selected' : ''}>Show live as riders run</option>
+            <option value="done" ${show.results === 'done' ? 'selected' : ''}>Show when each class is finished</option>
+            <option value="off" ${show.results === 'off' ? 'selected' : ''}>Don't show placings</option>
+          </select></label>
+        <p class="muted small">Viewers never see entry fees, the pot or payouts.</p>
+      </div>`;
+    if (!e.live) {
+      return `<section class="card">
+        <div class="card-head"><h2>Live results link</h2><span class="pill">Optional</span></div>
+        <p>Share a link so families can follow the draw and standings on their phones. They don't need an app or an account.</p>
+        ${options}
+        <div class="grid" style="margin-top:12px">
+          <label class="field">Organizer code<input id="live-code" value="${esc(S.organizerCode || '')}" autocomplete="off" placeholder="from the app's owner"></label>
+        </div>
+        <div class="row-actions" style="margin-top:12px"><button class="primary" data-action="live-start">Start live link</button></div>
+        <details style="margin-top:12px"><summary class="small muted">Advanced: use your own live server</summary>
+          <label class="field" style="margin-top:8px">Live server address<input id="live-server" value="${esc(S.liveServer || '')}" placeholder="${esc(DEFAULT_LIVE_SERVER)}" autocomplete="off"></label>
+          <p class="muted small">Groups can run their own free copy of the live server. See the project README.</p>
+        </details>
+      </section>`;
+    }
+    const link = liveLink(e);
+    return `<section class="card live-card">
+      <div class="card-head"><h2>Live results link</h2><span class="pill good"><span class="live-dot"></span> On</span></div>
+      <div class="live-share">
+        <div class="qr" aria-label="QR code for the live link">${qrSvg(link)}</div>
+        <div class="live-share-main">
+          <label class="field">Share this link<input id="live-url" value="${esc(link)}" readonly></label>
+          <div class="row-actions" style="margin-top:8px">
+            <button class="primary" data-action="live-share">Share…</button>
+            <button data-action="live-copy">Copy link</button>
+            <a class="btn" href="${esc(link)}" target="_blank" rel="noopener">Open</a>
+          </div>
+          <p class="small muted" style="margin-top:8px" data-live-status="${e.id}">${esc(liveStatusText(e))}</p>
+        </div>
+      </div>
+      ${options}
+      <div class="row-actions" style="margin-top:12px"><span class="spacer"></span><button class="danger" data-action="live-stop">Stop live link</button></div>
+    </section>`;
+  }
+
   // ------------------------------------------------------------ wiring
 
   document.addEventListener('click', (e2) => {
@@ -1144,6 +1407,21 @@
       return;
     }
     if (t.dataset.action === 'toggle-all') return act('toggle-all', t);
+    if (t.dataset.liveShow) {
+      e.liveShow = Object.assign(defaultLiveShow(), e.liveShow);
+      const k = t.dataset.liveShow;
+      e.liveShow[k] = t.type === 'checkbox' ? t.checked : t.value;
+      save();
+      return render();
+    }
+    if (t.id === 'live-code') {
+      S.organizerCode = t.value.trim();
+      return save();
+    }
+    if (t.id === 'live-server') {
+      S.liveServer = t.value.trim().replace(/\/+$/, '');
+      return save();
+    }
     if (t.dataset.ev) {
       const k = t.dataset.ev;
       if (k === 'gap') e.gap = Math.max(0, Math.min(50, parseInt(t.value, 10) || 0));
@@ -1252,6 +1530,7 @@
 
   ev();
   render();
+  queueLivePush(500);
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "open-barrels-live",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [{ "name": "LIVE", "class_name": "LiveEvent" }]
+  },
+  // The free plan only allows SQLite-backed Durable Objects.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveEvent"] }]
+}
