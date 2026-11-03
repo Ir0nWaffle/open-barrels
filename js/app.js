@@ -264,6 +264,7 @@
       <div class="row-actions">
         <button data-action="new-event">New blank event</button>
         <button data-action="copy-event">New event with these classes</button>
+        <button data-action="copy-event" data-riders="1">New event with these classes &amp; riders</button>
         <button data-action="export-event">Download backup</button>
         <label class="btn" for="importFile">Open backup…</label>
         <input id="importFile" type="file" accept=".json,application/json" hidden>
@@ -851,13 +852,26 @@
         ne.spaceHorses = e.spaceHorses;
         ne.liveShow = e.liveShow;
         ne.location = e.location;
+        const classMap = new Map();
         ne.classes = e.classes.map((c) => {
           const nc = newClass(c.name, c);
+          classMap.set(c.id, nc);
           return nc;
         });
+        const withRiders = el.dataset.riders === '1';
+        if (withRiders) {
+          // Same riders and horses in the same classes; no times, fresh draw.
+          for (const x of e.entries) {
+            const nc = classMap.get(x.classId);
+            if (!nc) continue;
+            const entry = { id: uid(), classId: nc.id, rider: x.rider, horse: x.horse, status: 'waiting', timeMs: null, barrels: 0, late: false };
+            ne.entries.push(entry);
+            nc.order.push(entry.id);
+          }
+        }
         S.events.unshift(ne);
         S.currentId = ne.id;
-        toast('New event created with the same classes');
+        toast(withRiders ? `New event created with the same classes and ${ne.entries.length} entries` : 'New event created with the same classes');
         break;
       }
       case 'delete-event':

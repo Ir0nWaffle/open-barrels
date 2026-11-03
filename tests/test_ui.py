@@ -175,6 +175,17 @@ def run(width, height, tag, base):
             page.click("text=Download backup")
         assert dl.value.suggested_filename.endswith(".json")
 
+        # New event with the same classes & riders: entries carried over, no times, fresh draw
+        page.click("text=New event with these classes & riders")
+        page.click(".tabs [data-tab=entries]")
+        assert page.locator(".entry-list li").count() == 23  # 22 + Late Larry
+        page.click(".tabs [data-tab=run]")
+        expect(page.locator("text=Shuffle all classes")).to_be_visible()
+        page.click("[data-action=run-class]:has-text('Junior')")
+        assert all(not page.locator(".time-in").nth(i).input_value() for i in range(page.locator(".time-in").count()))
+        expect(page.locator(".run-row", has_text="Late Larry")).not_to_contain_text("Late entry")
+        shot(page, f"{tag}-5-copied")
+
         browser.close()
     return errors
 
