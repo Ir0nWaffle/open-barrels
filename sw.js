@@ -1,6 +1,6 @@
 // Keeps the app working at arenas with no signal. Tries the network first so
 // updates show up, and falls back to the saved copy when offline.
-const CACHE = 'open-barrels-v3';
+const CACHE = 'open-barrels-v4';
 const FILES = ['./', 'index.html', 'live.html', 'js/live.js', 'js/config.js', 'js/vendor/qrcode.min.js', 'css/style.css', 'js/logic.js', 'js/app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -14,7 +14,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
