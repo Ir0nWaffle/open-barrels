@@ -43,7 +43,7 @@
   function connect() {
     clearTimeout(reconnectTimer);
     if (ended) return;
-    const wsUrl = server.replace(/^http/, 'ws') + '/api/events/' + id + '/ws';
+    const wsUrl = server.replace(/^http/, 'ws') + '/v1/rooms/' + id + '/ws';
     try {
       ws = new WebSocket(wsUrl);
     } catch (e) {
@@ -94,7 +94,7 @@
 
   // A closed socket might mean the link was ended while we were away.
   function checkStillExists() {
-    fetch(server + '/api/events/' + id, { cache: 'no-store' })
+    fetch(server + '/v1/rooms/' + id, { cache: 'no-store' })
       .then((r) => {
         if (r.status === 404) endedView();
       })

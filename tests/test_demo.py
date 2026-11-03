@@ -63,25 +63,25 @@ def main():
     srv.shutdown()
 
     # The app can't remove the demo label by sending demo: false.
-    s, r = call("POST", "/api/events", {"demo": True})
+    s, r = call("POST", "/v1/rooms", {"demo": True})
     assert s == 201 and r["demo"] and r["expiresAt"] - time.time() * 1000 > 23 * 3600 * 1000, (s, r)
-    s2, _ = call("PUT", f"/api/events/{r['id']}", {"name": "x", "demo": False, "expiresAt": 9e15}, r["adminKey"])
+    s2, _ = call("PUT", f"/v1/rooms/{r['id']}", {"name": "x", "demo": False, "expiresAt": 9e15}, r["adminKey"])
     assert s2 == 200
-    _, snap = call("GET", f"/api/events/{r['id']}")
+    _, snap = call("GET", f"/v1/rooms/{r['id']}")
     assert snap["data"]["demo"] is True and snap["data"]["expiresAt"] == r["expiresAt"], snap
 
     # Demos are too small to be abused for big uploads.
-    s3, _ = call("PUT", f"/api/events/{r['id']}", {"name": "x" * 70000}, r["adminKey"])
+    s3, _ = call("PUT", f"/v1/rooms/{r['id']}", {"name": "x" * 70000}, r["adminKey"])
     assert s3 == 413, s3
 
     # Cap: 3 per day locally -> the 4th is refused with a friendly message.
-    s4, r4 = call("POST", "/api/events", {"demo": True})
+    s4, r4 = call("POST", "/v1/rooms", {"demo": True})
     assert s4 == 201, s4
-    s5, r5 = call("POST", "/api/events", {"demo": True})
+    s5, r5 = call("POST", "/v1/rooms", {"demo": True})
     assert s5 == 429 and "used up" in r5["error"], (s5, r5)
 
     # Real organizer codes still work when demos are used up.
-    s6, r6 = call("POST", "/api/events", {"organizerCode": "test-code"})
+    s6, r6 = call("POST", "/v1/rooms", {"organizerCode": "test-code"})
     assert s6 == 201 and "demo" not in r6, (s6, r6)
 
     if errors:

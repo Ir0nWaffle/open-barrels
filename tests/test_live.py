@@ -108,7 +108,7 @@ def main():
 
         # What the server holds must contain no money at all.
         lid = link.split("e=")[1].split("&")[0]
-        raw = urllib.request.urlopen(urllib.request.Request(f"{SERVER}/api/events/{lid}", headers=UA)).read().decode()
+        raw = urllib.request.urlopen(urllib.request.Request(f"{SERVER}/v1/rooms/{lid}", headers=UA)).read().decode()
         snap = json.loads(raw)["data"]
         keys, values = set(), []
 
@@ -145,7 +145,7 @@ def main():
         admin.click("text=Stop live link")
         expect(viewer.locator("#connText")).to_have_text("Ended", timeout=6000)
         expect(admin.locator("text=Start live link")).to_be_visible()
-        gone = urllib.request.Request(f"{SERVER}/api/events/{lid}", headers=UA)
+        gone = urllib.request.Request(f"{SERVER}/v1/rooms/{lid}", headers=UA)
         try:
             urllib.request.urlopen(gone)
             raise AssertionError("event still exists after stop")

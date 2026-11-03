@@ -1220,7 +1220,7 @@
       st.sending = true;
       updateLiveStatus();
       try {
-        const res = await fetch(`${e.live.server}/api/events/${e.live.id}`, {
+        const res = await fetch(`${e.live.server}/v1/rooms/${e.live.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + e.live.adminKey },
           body,
@@ -1256,7 +1256,7 @@
     const btns = $$('[data-action=live-start], [data-action=live-demo]');
     btns.forEach((b) => (b.disabled = true));
     try {
-      const res = await fetch(server + '/api/events', {
+      const res = await fetch(server + '/v1/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(demo ? { demo: true } : { organizerCode: code }),
@@ -1285,7 +1285,7 @@
     if (!e.live) return;
     if (!confirm('Stop the live link? Anyone watching will see that it has ended, and the link will stop working.')) return;
     try {
-      await fetch(`${e.live.server}/api/events/${e.live.id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + e.live.adminKey } });
+      await fetch(`${e.live.server}/v1/rooms/${e.live.id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + e.live.adminKey } });
     } catch (err) {
       /* if offline the link simply expires later */
     }

@@ -5,12 +5,15 @@
  * the public results (names, horses, times, places — never money) and the
  * room pushes them to every viewer over a WebSocket.
  *
- *   POST   /api/events          { organizerCode }  -> { id, adminKey }
- *   POST   /api/events          { demo: true }     -> { id, adminKey, demo, expiresAt }
- *   GET    /api/events/:id                         -> latest public results
- *   GET    /api/events/:id/ws                      -> live updates (WebSocket)
- *   PUT    /api/events/:id      (Bearer adminKey)  -> publish new results
- *   DELETE /api/events/:id      (Bearer adminKey)  -> end the live link
+ *   POST   /v1/rooms           { organizerCode }  -> { id, adminKey }
+ *   POST   /v1/rooms           { demo: true }     -> { id, adminKey, demo, expiresAt }
+ *   GET    /v1/rooms/:id                         -> latest public results
+ *   GET    /v1/rooms/:id/ws                      -> live updates (WebSocket)
+ *   PUT    /v1/rooms/:id      (Bearer adminKey)  -> publish new results
+ *   DELETE /v1/rooms/:id      (Bearer adminKey)  -> end the live link
+ *
+ * The same routes also answer at /api/events for older copies of the app.
+ * (Ad blockers block any address containing "/api/event", hence the rename.)
  *
  * ORGANIZER_CODES (a secret) is a comma-separated list of codes allowed to
  * create live links. Give each approved organizer their own code so one can
@@ -68,7 +71,8 @@ export default {
     const parts = url.pathname.split('/').filter(Boolean);
 
     if (parts.length === 0) return json({ app: 'open-barrels-live', ok: true });
-    if (parts[0] !== 'api' || parts[1] !== 'events') return json({ error: 'Not found' }, 404);
+    const room = (parts[0] === 'v1' && parts[1] === 'rooms') || (parts[0] === 'api' && parts[1] === 'events');
+    if (!room) return json({ error: 'Not found' }, 404);
 
     if (parts.length === 2) {
       if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
